@@ -23,41 +23,73 @@ def extract_from_url(url):
     return None, None
 
 def resolve_share_code(code, share_type="AvatarItemDetails"):
-    """Try to resolve share code using Roblox API with cookie auth"""
-    try:
-        r = requests.get(
-            "https://share.roblox.com/v1/resolve",
-            params={"code": code, "type": share_type},
-            cookies={".ROBLOSECURITY": ROBLOSECURITY},
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "application/json",
-                "Referer": "https://www.roblox.com",
-                "Origin": "https://www.roblox.com",
-            },
-            timeout=10
-        )
+    """Try multiple Roblox API endpoints to resolve share code"""
+    
+    endpoints = [
+        # Try different possible endpoints
+        f"https://apis.roblox.com/share/v1/resolve?code={code}&type={share_type}",
+        f"https://www.roblox.com/share-links?code={code}&type={share_type}",
+    ]
+    
+    session = requests.Session()
+    session.cookies.set(".ROBLOSECURITY", ROBLOSECURITY, domain=".roblox.com")
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, text/html",
+        "Referer": "https://www.roblox.com",
+    })
 
-        print(f"[share.roblox.com] status={r.status_code} body={r.text[:300]}")
+    for endpoint in endpoints:
+        try:
+            r = session.get(endpoint, timeout=10, allow_redirects=True)
+            print(f"[endpoint] {endpoint}")
+            print(f"[status] {r.status_code}")
+            print(f"[final_url] {r.url}")
+            print(f"[body] {r.text[:500]}")
+            print("---")
 
-        if r.status_code == 200:
-            data = r.json()
-            item_id = (
-                data.get('assetId') or
-                data.get('AssetId') or
-                data.get('id') or
-                data.get('Id') or
-                data.get('itemId') or
-                data.get('ItemId')
-            )
+            # Check final redirected URL for ID
+            item_id, item_type = extract_from_url(r.url)
             if item_id:
-                return str(item_id), None
-            return None, f"no_id_in_response: {data}"
-        
-        return None, f"roblox_api_error_{r.status_code}: {r.text[:200]}"
+                return item_id, None
 
-    except Exception as e:
-        return None, f"exception: {str(e)}"
+            # Try parse JSON
+            try:
+                data = r.json()
+                item_id = (
+                    data.get('assetId') or data.get('AssetId') or
+                    data.get('id') or data.get('Id') or
+                    data.get('itemId') or data.get('ItemId')
+                )
+                if item_id:
+                    return str(item_id), None
+            except:
+                pass
+
+            # Scrape HTML for ID
+            for pattern in [
+                r'"assetId"\s*:\s*(\d+)',
+                r'"itemId"\s*:\s*(\d+)',
+                r'/catalog/(\d+)',
+                r'/bundles/(\d+)',
+                r'"id"\s*:\s*(\d+)',
+            ]:
+                match = re.search(pattern, r.text)
+                if match:
+                    return match.group(1), None
+
+        except Exception as e:
+            print(f"[error] {endpoint}: {e}")
+            continue
+
+    return None, "all_endpoints_failed"
+
+
+
+
+
+
+
 
 def resolve_via_redirect(url):
     """Follow redirect and scrape ID from final URL or page"""
