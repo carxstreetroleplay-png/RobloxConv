@@ -1,6 +1,8 @@
 from flask import Flask, jsonify, request
 import requests
 import os
+import re
+from urllib.parse import urlparse, parse_qs
 
 app = Flask(__name__)
 
@@ -26,14 +28,22 @@ def resolve_via_api(share_code, item_type, roblosecurity):
 
 @app.route('/resolve')
 def resolve():
-    code = request.args.get('code')
-    item_type = request.args.get('type', 'AvatarItemDetails')
+    share_url = request.args.get('url')
 
-    if not code:
-        return jsonify({'error': 'missing_code'}), 400
+    if not share_url:
+        return jsonify({'error': 'missing_url'}), 400
 
     if not ROBLOSECURITY:
         return jsonify({'error': 'server_missing_cookie'}), 500
+
+    parsed = urlparse(share_url)
+    qs = parse_qs(parsed.query)
+
+    code = qs.get('code', [None])[0]
+    item_type = qs.get('type', ['AvatarItemDetails'])[0]
+
+    if not code:
+        return jsonify({'error': 'url_missing_code_param', 'url': share_url}), 400
 
     result = resolve_via_api(code, item_type, ROBLOSECURITY)
     return jsonify(result)
