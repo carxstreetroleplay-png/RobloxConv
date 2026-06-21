@@ -23,68 +23,53 @@ def extract_from_url(url):
     return None, None
 
 def resolve_share_code(code, share_type="AvatarItemDetails"):
-    """Try multiple Roblox API endpoints to resolve share code"""
-    
-    endpoints = [
-        # Try different possible endpoints
-        f"https://apis.roblox.com/share/v1/resolve?code={code}&type={share_type}",
-        f"https://www.roblox.com/share-links?code={code}&type={share_type}",
-    ]
-    
     session = requests.Session()
     session.cookies.set(".ROBLOSECURITY", ROBLOSECURITY, domain=".roblox.com")
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json, text/html",
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
         "Referer": "https://www.roblox.com",
+        "x-csrf-token": get_csrf_token(session),
     })
 
-    for endpoint in endpoints:
+    # Try the internal API the frontend JS calls
+    endpoints = [
+        f"https://apis.roblox.com/sharelinks/v1/resolve-link",
+        f"https://www.roblox.com/sharelinks/v1/resolve",
+        f"https://apis.roblox.com/sharelinks/v1/link-types/{share_type}/resolve",
+    ]
+
+    for url in endpoints:
         try:
-            r = session.get(endpoint, timeout=10, allow_redirects=True)
-            print(f"[endpoint] {endpoint}")
-            print(f"[status] {r.status_code}")
-            print(f"[final_url] {r.url}")
-            print(f"[body] {r.text[:500]}")
-            print("---")
+            # Try POST with JSON body
+            r = session.post(url, json={
+                "code": code,
+                "type": share_type
+            }, timeout=10)
+            print(f"POST {url} → {r.status_code}: {r.text[:200]}")
 
-            # Check final redirected URL for ID
-            item_id, item_type = extract_from_url(r.url)
-            if item_id:
-                return item_id, None
-
-            # Try parse JSON
-            try:
+            if r.status_code == 200:
                 data = r.json()
                 item_id = (
-                    data.get('assetId') or data.get('AssetId') or
-                    data.get('id') or data.get('Id') or
-                    data.get('itemId') or data.get('ItemId')
+                    data.get('assetId') or data.get('id') or
+                    data.get('itemId') or data.get('bundleId')
                 )
                 if item_id:
                     return str(item_id), None
-            except:
-                pass
-
-            # Scrape HTML for ID
-            for pattern in [
-                r'"assetId"\s*:\s*(\d+)',
-                r'"itemId"\s*:\s*(\d+)',
-                r'/catalog/(\d+)',
-                r'/bundles/(\d+)',
-                r'"id"\s*:\s*(\d+)',
-            ]:
-                match = re.search(pattern, r.text)
-                if match:
-                    return match.group(1), None
 
         except Exception as e:
-            print(f"[error] {endpoint}: {e}")
-            continue
+            print(f"Error {url}: {e}")
 
-    return None, "all_endpoints_failed"
+    return None, "not_found"
 
 
+def get_csrf_token(session):
+    """Get CSRF token from Roblox"""
+    try:
+        r = session.post("https://auth.roblox.com/v2/logout")
+        return r.headers.get("x-csrf-token", "")
+    except:
+        return ""
 
 
 
