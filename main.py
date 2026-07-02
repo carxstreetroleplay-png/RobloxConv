@@ -49,6 +49,47 @@ def resolve():
     return jsonify(result)
 
 
+@app.route("/search")
+def search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "missing query"}), 400
+    if len(query) > 50:
+        return jsonify({"error": "query too long"}), 400
+
+    try:
+        limit = min(int(request.args.get("limit", 30)), 30)
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
+
+    try:
+        url = (
+            "https://catalog.roblox.com/v1/search/items/details"
+            f"?Keyword={requests.utils.quote(query)}&Limit={limit}&SortType=3"
+        )
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as e:
+        print("search error:", e)
+        return jsonify({"error": "roblox catalog error"}), 502
+    except Exception as e:
+        print("search error:", e)
+        return jsonify({"error": "search failed"}), 500
+
+    items = [
+        {
+            "id": item["id"],
+            "name": item["name"],
+            "price": item.get("price"),          # null in JSON becomes None
+            "itemType": item["itemType"],
+            "creator": item["creatorName"],
+        }
+        for item in data.get("data", [])
+    ]
+
+    return jsonify({"items": items})
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
